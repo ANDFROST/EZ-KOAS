@@ -9,6 +9,7 @@ void main() {
 class VitalsEntry {
   final String time;
   final String bp;
+  final String sens;
   final String hr;
   final String rr;
   final String spo2;
@@ -22,28 +23,45 @@ class VitalsEntry {
   final String ivDrugRate;
 
   VitalsEntry({
-    required this.time, required this.bp, required this.hr, required this.rr, required this.spo2,
-    required this.o2Method, required this.lpm, required this.temp,
-    required this.isGdsChecked, required this.gdsValue, 
-    required this.isOnIVDrug, required this.ivDrugName, required this.ivDrugRate,
+    required this.time,
+    required this.bp,
+    required this.sens,
+    required this.hr,
+    required this.rr,
+    required this.spo2,
+    required this.o2Method,
+    required this.lpm,
+    required this.temp,
+    required this.isGdsChecked,
+    required this.gdsValue,
+    required this.isOnIVDrug,
+    required this.ivDrugName,
+    required this.ivDrugRate,
   });
 
   String toFormattedString() {
-    List<String> lines = []; 
+    List<String> lines = [];
 
     if (time.isNotEmpty) lines.add('($time)');
+    if (sens.isNotEmpty) {
+      final sensLabel = sens == 'Compos mentis' ? 'CM' : sens;
+      lines.add('Sens: $sensLabel');
+    }
     if (bp.isNotEmpty) lines.add('TD: $bp mmHg');
     if (hr.isNotEmpty) lines.add('HR: $hr x/i');
     if (rr.isNotEmpty) lines.add('RR: $rr x/i');
 
     if (spo2.isNotEmpty) {
       String o2Abbr = '';
-      if (o2Method == 'Room Air (RA)') o2Abbr = 'RA';
-      else if (o2Method == 'Nasal Cannula (NK)') o2Abbr = 'NK';
-      else if (o2Method == 'Non Rebreathing Mask (NRM)') o2Abbr = 'NRM';
+      if (o2Method == 'Room Air (RA)') {
+        o2Abbr = 'RA';
+      } else if (o2Method == 'Nasal Cannula (NK)')
+        o2Abbr = 'NK';
+      else if (o2Method == 'Non Rebreathing Mask (NRM)')
+        o2Abbr = 'NRM';
 
       if (o2Abbr == 'RA') {
-        lines.add('SpO2: $spo2% ($o2Abbr)');
+        lines.add('SpO2: $spo2% $o2Abbr');
       } else {
         String lpmStr = lpm.isNotEmpty ? ' $lpm lpm' : '';
         lines.add('SpO2: $spo2% on $o2Abbr$lpmStr');
@@ -51,9 +69,9 @@ class VitalsEntry {
     }
 
     if (temp.isNotEmpty) lines.add('Temp: $temp C');
-    
+
     if (isGdsChecked && gdsValue.isNotEmpty) lines.add('GDS: $gdsValue mg/dL');
-    
+
     if (isOnIVDrug) {
       String rate = ivDrugRate.isNotEmpty ? ' $ivDrugRate cc/jam' : '';
       lines.add('Terpasang $ivDrugName$rate');
@@ -72,7 +90,11 @@ class PatientRecord {
   List<VitalsEntry> vitals;
 
   PatientRecord({
-    required this.room, required this.rm, required this.name, required this.gender, required this.vitals
+    required this.room,
+    required this.rm,
+    required this.name,
+    required this.gender,
+    required this.vitals,
   });
 
   void sortVitals() {
@@ -84,23 +106,24 @@ class PatientRecord {
           int minutes = int.tryParse(parts[1].trim()) ?? 0;
           return (hours * 60) + minutes;
         }
-        return 0; 
+        return 0;
       }
+
       return parseTime(a.time).compareTo(parseTime(b.time));
     });
   }
 
   String toFormattedString() {
     List<String> headerParts = [];
-    
+
     if (room.isNotEmpty) headerParts.add(room);
     if (name.isNotEmpty) headerParts.add(name);
-    
+
     headerParts.add(gender == 'Laki-laki (L)' ? 'L' : 'P');
-    
+
     if (rm.isNotEmpty) headerParts.add(rm);
 
-    String header = headerParts.join('/'); 
+    String header = headerParts.join('/');
     String vitalsStr = vitals.map((v) => v.toFormattedString()).join('\n\n');
 
     return '''
@@ -108,7 +131,8 @@ $header
 
 TTV
 $vitalsStr
-'''.trim(); 
+'''
+        .trim();
   }
 }
 
@@ -141,36 +165,55 @@ class _VitalsScreenState extends State<VitalsScreen> {
   double _fabY = 0;
   bool _isFabInitialized = false;
 
-  List<PatientRecord> _savedPatientsList = [];
-  
-  int? _editingPatientIndex; 
-  int? _editingVitalsIndex; 
+  final List<PatientRecord> _savedPatientsList = [];
+
+  int? _editingPatientIndex;
+  int? _editingVitalsIndex;
 
   final TextEditingController _roomController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _rmController = TextEditingController();
-  
+
   final List<String> _genderOptions = ['Laki-laki (L)', 'Perempuan (P)'];
   String _selectedGender = 'Laki-laki (L)';
 
-  final TextEditingController _timeController = TextEditingController(); 
+  final List<String> _sensOptions = [
+    'Compos mentis',
+    'Apatis',
+    'Somnolen',
+    'Delirium',
+    'Coma',
+  ];
+  String? _selectedSens;
+
+  final TextEditingController _timeController = TextEditingController();
   final TextEditingController _bpController = TextEditingController();
   final TextEditingController _hrController = TextEditingController();
   final TextEditingController _rrController = TextEditingController();
   final TextEditingController _spo2Controller = TextEditingController();
   final TextEditingController _tempController = TextEditingController();
-  final TextEditingController _lpmController = TextEditingController(); 
+  final TextEditingController _lpmController = TextEditingController();
 
   bool _isGdsChecked = false;
   final TextEditingController _gdsController = TextEditingController();
 
-  final List<String> _o2Options = ['Room Air (RA)', 'Nasal Cannula (NK)', 'Non Rebreathing Mask (NRM)'];
-  String _selectedO2Method = 'Room Air (RA)'; 
+  final List<String> _o2Options = [
+    'Room Air (RA)',
+    'Nasal Cannula (NK)',
+    'Non Rebreathing Mask (NRM)',
+  ];
+  String _selectedO2Method = 'Room Air (RA)';
 
   bool _isOnIVDrug = false;
   final TextEditingController _ivRateController = TextEditingController();
   final List<String> _ivDrugOptions = [
-    'Novorapid', 'Norepinephrine', 'Furosemide', 'Nicardipine', 'Dopamine', 'Dobutamine', 'Lainnya'
+    'Novorapid',
+    'Norepinephrine',
+    'Furosemide',
+    'Nicardipine',
+    'Dopamine',
+    'Dobutamine',
+    'Lainnya',
   ];
   String _selectedIVDrug = 'Novorapid';
 
@@ -187,7 +230,7 @@ class _VitalsScreenState extends State<VitalsScreen> {
   void initState() {
     super.initState();
     _timeController.text = _getCurrentTime();
-    
+
     // Initialize notes with medical protocols
     _notesController.text = '''Protokol Hiperglikemia
 "Protokol Hiperglikemia jika GDS di atas 200
@@ -228,21 +271,21 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
 
   String _formatTime(String input) {
     if (input.trim().isEmpty) return _getCurrentTime();
-    
+
     String sanitized = input.replaceAll('.', ':');
     List<String> parts = sanitized.split(':');
-    
+
     if (parts.length == 2) {
       String hours = parts[0].trim().padLeft(2, '0');
       String minutes = parts[1].trim();
       if (minutes.length == 1) {
-        minutes = '0$minutes'; 
+        minutes = '0$minutes';
       } else {
         minutes = minutes.padLeft(2, '0');
       }
       return '$hours:$minutes';
     }
-    return sanitized; 
+    return sanitized;
   }
 
   // --- NEW: Logic to analyze GDS based on your protocol ---
@@ -261,37 +304,45 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     String? rate;
 
     if (gds < 70) {
-      message = 'Protokol Hipoglikemia:\nJika KGDs <70, berikan bolus D40% 2flc\nCek ulang KGD dalam 30 menit.';
-      rate = null; 
+      message =
+          'Protokol Hipoglikemia:\nJika KGDs <70, berikan bolus D40% 2flc\nCek ulang KGD dalam 30 menit.';
+      rate = null;
     } else if (gds >= 70 && gds < 100) {
       message = 'GDS < 100\nSTOP Drip. Lapor Residen/DPJP!';
       rate = '0.5';
     } else if (gds >= 100 && gds <= 150) {
-      message = 'Protokol Hiperglikemia:\nDosis: 0.5 cc/jam\nFollow-up GDS per 3 jam.';
+      message =
+          'Protokol Hiperglikemia:\nDosis: 0.5 cc/jam\nFollow-up GDS per 3 jam.';
       rate = '0.5';
     } else if (gds > 150 && gds <= 200) {
-      message = 'Protokol Hiperglikemia:\nDosis: 1 cc/jam\nFollow-up GDS per 3 jam.';
+      message =
+          'Protokol Hiperglikemia:\nDosis: 1 cc/jam\nFollow-up GDS per 3 jam.';
       rate = '1';
     } else if (gds > 200 && gds <= 250) {
-      message = 'Protokol Hiperglikemia:\nDosis: 2 cc/jam\nFollow-up GDS per 3 jam.';
+      message =
+          'Protokol Hiperglikemia:\nDosis: 2 cc/jam\nFollow-up GDS per 3 jam.';
       rate = '2';
     } else if (gds > 250 && gds <= 300) {
-      message = 'Protokol Hiperglikemia:\nDosis: 2.5 cc/jam\nFollow-up GDS per 3 jam.';
+      message =
+          'Protokol Hiperglikemia:\nDosis: 2.5 cc/jam\nFollow-up GDS per 3 jam.';
       rate = '2.5';
     } else if (gds > 300 && gds <= 350) {
-      message = 'Protokol Hiperglikemia:\nDosis: 3 cc/jam\nFollow-up GDS per 3 jam.';
+      message =
+          'Protokol Hiperglikemia:\nDosis: 3 cc/jam\nFollow-up GDS per 3 jam.';
       rate = '3';
     } else if (gds > 350 && gds <= 400) {
-      message = 'Protokol Hiperglikemia:\nDosis: 3.5 cc/jam\nFollow-up GDS per 3 jam.';
+      message =
+          'Protokol Hiperglikemia:\nDosis: 3.5 cc/jam\nFollow-up GDS per 3 jam.';
       rate = '3.5';
     } else if (gds > 400 && gds <= 450) {
-      message = 'Protokol Hiperglikemia:\nDosis: 6 cc/jam\nFollow-up GDS per 3 jam.';
+      message =
+          'Protokol Hiperglikemia:\nDosis: 6 cc/jam\nFollow-up GDS per 3 jam.';
       rate = '6';
     } else if (gds > 450) {
-      message = 'PERINGATAN: GDS > 450!\nNaikkan dosis 1 cc/jam.\nFollow-up GDS PER 1 JAM sampai < 400.';
+      message =
+          'PERINGATAN: GDS > 450!\nNaikkan dosis 1 cc/jam.\nFollow-up GDS PER 1 JAM sampai < 400.';
       // We don't auto-set rate here because it depends on their previous rate + 1
-      rate = null; 
-    
+      rate = null;
     }
 
     setState(() {
@@ -310,17 +361,18 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _spo2Controller.clear();
     _tempController.clear();
     _lpmController.clear();
-    _gdsController.clear(); 
-    _ivRateController.clear(); 
-    _timeController.text = _getCurrentTime(); 
-    
+    _gdsController.clear();
+    _ivRateController.clear();
+    _timeController.text = _getCurrentTime();
+
     setState(() {
       _selectedGender = 'Laki-laki (L)';
+      _selectedSens = null;
       _selectedO2Method = 'Room Air (RA)';
-      _isGdsChecked = false; 
-      _isOnIVDrug = false; 
-      _selectedIVDrug = 'Novorapid'; 
-      _editingPatientIndex = null; 
+      _isGdsChecked = false;
+      _isOnIVDrug = false;
+      _selectedIVDrug = 'Novorapid';
+      _editingPatientIndex = null;
       _editingVitalsIndex = null;
       _gdsProtocolMessage = null; // Clear protocol warning
       _suggestedNovorapidRate = null;
@@ -328,82 +380,92 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
   }
 
   void _savePatient() {
-    if (_nameController.text.isEmpty && _rmController.text.isEmpty) return; 
+    if (_nameController.text.isEmpty && _rmController.text.isEmpty) return;
 
     final newVitals = VitalsEntry(
       time: _formatTime(_timeController.text),
       bp: _bpController.text,
+      sens: _selectedSens ?? '',
       hr: _hrController.text,
       rr: _rrController.text,
       spo2: _spo2Controller.text,
       o2Method: _selectedO2Method,
       lpm: _lpmController.text,
       temp: _tempController.text,
-      isGdsChecked: _isGdsChecked, 
-      gdsValue: _gdsController.text, 
+      isGdsChecked: _isGdsChecked,
+      gdsValue: _gdsController.text,
       isOnIVDrug: _isOnIVDrug,
       ivDrugName: _selectedIVDrug,
       ivDrugRate: _ivRateController.text,
     );
-    
+
     setState(() {
       if (_editingPatientIndex != null && _editingVitalsIndex != null) {
         _savedPatientsList[_editingPatientIndex!].room = _roomController.text;
         _savedPatientsList[_editingPatientIndex!].rm = _rmController.text;
         _savedPatientsList[_editingPatientIndex!].name = _nameController.text;
         _savedPatientsList[_editingPatientIndex!].gender = _selectedGender;
-        _savedPatientsList[_editingPatientIndex!].vitals[_editingVitalsIndex!] = newVitals;
-        _savedPatientsList[_editingPatientIndex!].sortVitals(); 
-      } 
-      else if (_editingPatientIndex != null && _editingVitalsIndex == null) {
+        _savedPatientsList[_editingPatientIndex!].vitals[_editingVitalsIndex!] =
+            newVitals;
+        _savedPatientsList[_editingPatientIndex!].sortVitals();
+      } else if (_editingPatientIndex != null && _editingVitalsIndex == null) {
         _savedPatientsList[_editingPatientIndex!].room = _roomController.text;
         _savedPatientsList[_editingPatientIndex!].rm = _rmController.text;
         _savedPatientsList[_editingPatientIndex!].name = _nameController.text;
         _savedPatientsList[_editingPatientIndex!].gender = _selectedGender;
         _savedPatientsList[_editingPatientIndex!].vitals.add(newVitals);
-        _savedPatientsList[_editingPatientIndex!].sortVitals(); 
-      } 
-      else {
+        _savedPatientsList[_editingPatientIndex!].sortVitals();
+      } else {
         int existingIdx = -1;
         if (_rmController.text.isNotEmpty) {
-          existingIdx = _savedPatientsList.indexWhere((p) => p.rm == _rmController.text);
+          existingIdx = _savedPatientsList.indexWhere(
+            (p) => p.rm == _rmController.text,
+          );
         }
 
         if (existingIdx != -1) {
           _savedPatientsList[existingIdx].vitals.add(newVitals);
           _savedPatientsList[existingIdx].sortVitals();
         } else {
-          _savedPatientsList.add(PatientRecord(
-            room: _roomController.text,
-            rm: _rmController.text,
-            name: _nameController.text,
-            gender: _selectedGender,
-            vitals: [newVitals] 
-          ));
+          _savedPatientsList.add(
+            PatientRecord(
+              room: _roomController.text,
+              rm: _rmController.text,
+              name: _nameController.text,
+              gender: _selectedGender,
+              vitals: [newVitals],
+            ),
+          );
         }
       }
     });
 
     _clearForm();
-    FocusScope.of(context).unfocus(); 
+    FocusScope.of(context).unfocus();
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Data disimpan! Total pasien: ${_savedPatientsList.length}'), duration: const Duration(seconds: 1)),
+      SnackBar(
+        content: Text(
+          'Data disimpan! Total pasien: ${_savedPatientsList.length}',
+        ),
+        duration: const Duration(seconds: 1),
+      ),
     );
   }
 
   void _addVitalsToPatient(int pIndex) {
-    Navigator.pop(context); 
-    
+    Navigator.pop(context);
+
     final patient = _savedPatientsList[pIndex];
     setState(() {
       _editingPatientIndex = pIndex;
-      _editingVitalsIndex = null; 
+      _editingVitalsIndex = null;
 
       _roomController.text = patient.room;
       _rmController.text = patient.rm;
       _nameController.text = patient.name;
       _selectedGender = patient.gender;
+      _selectedSens = null;
 
       _bpController.clear();
       _hrController.clear();
@@ -411,29 +473,29 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _spo2Controller.clear();
       _tempController.clear();
       _lpmController.clear();
-      _gdsController.clear(); 
+      _gdsController.clear();
       _ivRateController.clear();
-      
-      _isGdsChecked = false; 
+
+      _isGdsChecked = false;
       _isOnIVDrug = false;
       _selectedO2Method = 'Room Air (RA)';
       _selectedIVDrug = 'Novorapid';
       _timeController.text = _getCurrentTime();
-      _gdsProtocolMessage = null; 
+      _gdsProtocolMessage = null;
       _suggestedNovorapidRate = null;
     });
   }
 
   void _editSpecificVitals(int pIndex, int vIndex) {
-    Navigator.pop(context); 
+    Navigator.pop(context);
 
     final patient = _savedPatientsList[pIndex];
     final vitalsToEdit = patient.vitals[vIndex];
-    
+
     setState(() {
-      _editingPatientIndex = pIndex; 
+      _editingPatientIndex = pIndex;
       _editingVitalsIndex = vIndex;
-      
+
       _roomController.text = patient.room;
       _rmController.text = patient.rm;
       _nameController.text = patient.name;
@@ -441,20 +503,21 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
 
       _timeController.text = vitalsToEdit.time;
       _bpController.text = vitalsToEdit.bp;
+      _selectedSens = vitalsToEdit.sens;
       _hrController.text = vitalsToEdit.hr;
       _rrController.text = vitalsToEdit.rr;
       _spo2Controller.text = vitalsToEdit.spo2;
       _selectedO2Method = vitalsToEdit.o2Method;
       _lpmController.text = vitalsToEdit.lpm;
       _tempController.text = vitalsToEdit.temp;
-      
+
       _isGdsChecked = vitalsToEdit.isGdsChecked;
       _gdsController.text = vitalsToEdit.gdsValue;
-      
+
       _isOnIVDrug = vitalsToEdit.isOnIVDrug;
       _selectedIVDrug = vitalsToEdit.ivDrugName;
       _ivRateController.text = vitalsToEdit.ivDrugRate;
-      
+
       // Re-evaluate protocol when loading old data
       _evaluateGDSProtocol(vitalsToEdit.gdsValue);
     });
@@ -473,7 +536,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       if (_savedPatientsList[pIndex].vitals.isEmpty) {
         _savedPatientsList.removeAt(pIndex);
       }
-      if (_editingPatientIndex == pIndex && _editingVitalsIndex == vIndex) _clearForm();
+      if (_editingPatientIndex == pIndex && _editingVitalsIndex == vIndex)
+        _clearForm();
     });
   }
 
@@ -482,20 +546,30 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Reset Antrean?'),
-        content: const Text('Semua data pasien yang tersimpan akan dihapus permanen. Lanjutkan?'),
+        content: const Text(
+          'Semua data pasien yang tersimpan akan dihapus permanen. Lanjutkan?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
           TextButton(
             onPressed: () {
               setState(() {
                 _savedPatientsList.clear();
                 _clearForm();
               });
-              Navigator.pop(context); 
-              Navigator.pop(context); 
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Semua antrean dihapus.')));
+              Navigator.pop(context);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Semua antrean dihapus.')),
+              );
             },
-            child: const Text('Hapus Semua', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: const Text(
+              'Hapus Semua',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -518,7 +592,9 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
             int hyperStart = notesContent.indexOf('Protokol Hiperglikemia');
             int hyperEnd = notesContent.indexOf('Protokol Hipoglikemia');
             if (hyperStart != -1 && hyperEnd != -1) {
-              hyperglycemiaProtocol = notesContent.substring(hyperStart, hyperEnd).trim();
+              hyperglycemiaProtocol = notesContent
+                  .substring(hyperStart, hyperEnd)
+                  .trim();
             } else if (hyperStart != -1) {
               hyperglycemiaProtocol = notesContent.substring(hyperStart).trim();
             }
@@ -536,7 +612,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
 
             return Dialog(
               insetPadding: const EdgeInsets.all(16),
-              child: Container(
+              child: SizedBox(
                 width: MediaQuery.of(context).size.width * 0.9,
                 height: MediaQuery.of(context).size.height * 0.8,
                 child: Column(
@@ -556,7 +632,10 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                         children: [
                           const Text(
                             'Catatan Medis',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                           IconButton(
                             icon: const Icon(Icons.close),
@@ -576,11 +655,16 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                             if (generalNotes.isNotEmpty) ...[
                               const Text(
                                 'Catatan Umum',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               const SizedBox(height: 8),
                               TextField(
-                                controller: TextEditingController(text: generalNotes),
+                                controller: TextEditingController(
+                                  text: generalNotes,
+                                ),
                                 maxLines: 3,
                                 decoration: const InputDecoration(
                                   hintText: 'Tambahkan catatan umum...',
@@ -590,7 +674,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                 style: const TextStyle(fontSize: 14),
                                 onChanged: (value) {
                                   // Update general notes
-                                  String updatedContent = value + '\n\n' + hyperglycemiaProtocol + '\n\n' + hypoglycemiaProtocol;
+                                  String updatedContent =
+                                      '$value\n\n$hyperglycemiaProtocol\n\n$hypoglycemiaProtocol';
                                   _notesController.text = updatedContent.trim();
                                 },
                               ),
@@ -606,13 +691,22 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                     ListTile(
                                       title: const Text(
                                         'Protokol Hiperglikemia',
-                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red),
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.red,
+                                        ),
                                       ),
                                       trailing: IconButton(
-                                        icon: Icon(_isHyperglycemiaExpanded ? Icons.expand_less : Icons.expand_more),
+                                        icon: Icon(
+                                          _isHyperglycemiaExpanded
+                                              ? Icons.expand_less
+                                              : Icons.expand_more,
+                                        ),
                                         onPressed: () {
                                           setState(() {
-                                            _isHyperglycemiaExpanded = !_isHyperglycemiaExpanded;
+                                            _isHyperglycemiaExpanded =
+                                                !_isHyperglycemiaExpanded;
                                           });
                                         },
                                       ),
@@ -621,8 +715,14 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                       Padding(
                                         padding: const EdgeInsets.all(16),
                                         child: Text(
-                                          hyperglycemiaProtocol.replaceFirst('Protokol Hiperglikemia\n', ''),
-                                          style: const TextStyle(fontSize: 14, height: 1.5),
+                                          hyperglycemiaProtocol.replaceFirst(
+                                            'Protokol Hiperglikemia\n',
+                                            '',
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            height: 1.5,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -641,13 +741,22 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                     ListTile(
                                       title: const Text(
                                         'Protokol Hipoglikemia',
-                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue),
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue,
+                                        ),
                                       ),
                                       trailing: IconButton(
-                                        icon: Icon(_isHypoglycemiaExpanded ? Icons.expand_less : Icons.expand_more),
+                                        icon: Icon(
+                                          _isHypoglycemiaExpanded
+                                              ? Icons.expand_less
+                                              : Icons.expand_more,
+                                        ),
                                         onPressed: () {
                                           setState(() {
-                                            _isHypoglycemiaExpanded = !_isHypoglycemiaExpanded;
+                                            _isHypoglycemiaExpanded =
+                                                !_isHypoglycemiaExpanded;
                                           });
                                         },
                                       ),
@@ -656,8 +765,14 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                       Padding(
                                         padding: const EdgeInsets.all(16),
                                         child: Text(
-                                          hypoglycemiaProtocol.replaceFirst('Protokol Hipoglikemia\n', ''),
-                                          style: const TextStyle(fontSize: 14, height: 1.5),
+                                          hypoglycemiaProtocol.replaceFirst(
+                                            'Protokol Hipoglikemia\n',
+                                            '',
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            height: 1.5,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -670,13 +785,17 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                             // Additional Notes Section
                             const Text(
                               'Catatan Tambahan',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             TextField(
                               maxLines: 5,
                               decoration: const InputDecoration(
-                                hintText: 'Tambahkan catatan tambahan di sini...',
+                                hintText:
+                                    'Tambahkan catatan tambahan di sini...',
                                 border: OutlineInputBorder(),
                                 contentPadding: EdgeInsets.all(8),
                               ),
@@ -697,24 +816,51 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
   }
 
   void _copyAllToClipboard({bool useIzinFormat = false}) {
-    if (_nameController.text.isNotEmpty || _rmController.text.isNotEmpty) _savePatient(); 
+    if (_nameController.text.isNotEmpty || _rmController.text.isNotEmpty)
+      _savePatient();
 
     if (_savedPatientsList.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Belum ada data untuk di-copy.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Belum ada data untuk di-copy.')),
+      );
       return;
     }
 
-    String allDataCombined = _savedPatientsList.map((record) => record.toFormattedString()).join('\n\n------------------\n\n');
+    String allDataCombined = _savedPatientsList
+        .map((record) => record.toFormattedString())
+        .join('\n\n------------------\n\n');
 
     // Add prefix if the Izin button was pressed
     if (useIzinFormat) {
-      allDataCombined = 'Izin kak/bang, izin mengirimkan folket atas nama:\n\n$allDataCombined';
+      allDataCombined =
+          'Izin kak/bang, izin mengirimkan folket atas nama:\n\n$allDataCombined';
     }
 
     Clipboard.setData(ClipboardData(text: allDataCombined));
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Berhasil meng-copy ${_savedPatientsList.length} pasien!'), duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Text(
+          'Berhasil meng-copy ${_savedPatientsList.length} pasien!',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _copySinglePatient(int index) {
+    final patient = _savedPatientsList[index];
+    final data = patient.toFormattedString();
+
+    Clipboard.setData(ClipboardData(text: data));
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Berhasil meng-copy ${patient.name.isNotEmpty ? patient.name : 'pasien'}!',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
@@ -729,8 +875,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _rrController.dispose();
     _spo2Controller.dispose();
     _tempController.dispose();
-    _lpmController.dispose(); 
-    _gdsController.dispose(); 
+    _lpmController.dispose();
+    _gdsController.dispose();
     _ivRateController.dispose();
     _notesController.dispose(); // NEW: Dispose notes controller
     super.dispose();
@@ -740,13 +886,13 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
   Widget build(BuildContext context) {
     if (!_isFabInitialized) {
       final size = MediaQuery.of(context).size;
-      _fabX = size.width - 150; 
+      _fabX = size.width - 150;
       _fabY = size.height - 120;
       _isFabInitialized = true;
     }
 
     return Scaffold(
-      key: _scaffoldKey, 
+      key: _scaffoldKey,
       appBar: AppBar(
         title: Row(
           children: [
@@ -766,9 +912,9 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
-      
+
       endDrawer: Drawer(
-        width: MediaQuery.of(context).size.width * 0.85, 
+        width: MediaQuery.of(context).size.width * 0.85,
         child: SafeArea(
           child: Column(
             children: [
@@ -777,119 +923,202 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Antrean Pasien', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Antrean Pasien',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     TextButton.icon(
                       onPressed: _resetAll,
-                      icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 20),
-                      label: const Text('Reset', style: TextStyle(color: Colors.red)),
+                      icon: const Icon(
+                        Icons.delete_sweep,
+                        color: Colors.red,
+                        size: 20,
+                      ),
+                      label: const Text(
+                        'Reset',
+                        style: TextStyle(color: Colors.red),
+                      ),
                     ),
                   ],
                 ),
               ),
-              
-              const Divider(height: 1),
-              
-              Expanded(
-                child: _savedPatientsList.isEmpty 
-                  ? const Center(child: Text('Belum ada pasien tersimpan', style: TextStyle(color: Colors.grey)))
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(8),
-                      itemCount: _savedPatientsList.length,
-                      itemBuilder: (context, pIndex) {
-                        final patient = _savedPatientsList[pIndex];
-                        return Card(
-                          elevation: 2,
-                          margin: const EdgeInsets.only(bottom: 12),
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Column(
-                              children: [
-                                ListTile(
-                                  title: Text(
-                                    patient.name.isNotEmpty ? patient.name : 'Pasien Tanpa Nama',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                  ),
-                                  subtitle: Text('RM: ${patient.rm} | Kamar: ${patient.room}'),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min, 
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.add_alarm, color: Colors.green),
-                                        tooltip: 'Tambah TTV',
-                                        onPressed: () => _addVitalsToPatient(pIndex),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete, color: Colors.red),
-                                        tooltip: 'Hapus',
-                                        onPressed: () => _deletePatient(pIndex),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Divider(height: 1),
-                                ...patient.vitals.asMap().entries.map((entry) {
-                                  int vIndex = entry.key;
-                                  VitalsEntry vitals = entry.value;
-                                  bool isEditingThis = (_editingPatientIndex == pIndex && _editingVitalsIndex == vIndex);
 
-                                  return Container(
-                                    color: isEditingThis ? Colors.orange.shade50 : Colors.transparent,
-                                    child: ListTile(
-                                      dense: true,
-                                      leading: const Icon(Icons.monitor_heart, color: Colors.teal, size: 20),
-                                      title: Text('Jam: ${vitals.time}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                      subtitle: Text('TD: ${vitals.bp} | HR: ${vitals.hr} | SpO2: ${vitals.spo2}%'),
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          IconButton(
-                                            icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
-                                            onPressed: () => _editSpecificVitals(pIndex, vIndex),
-                                          ),
-                                          IconButton(
-                                            icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 20),
-                                            onPressed: () => _deleteSpecificVitals(pIndex, vIndex),
-                                          ),
-                                        ],
+              const Divider(height: 1),
+
+              Expanded(
+                child: _savedPatientsList.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Belum ada pasien tersimpan',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(8),
+                        itemCount: _savedPatientsList.length,
+                        itemBuilder: (context, pIndex) {
+                          final patient = _savedPatientsList[pIndex];
+                          return Card(
+                            elevation: 2,
+                            margin: const EdgeInsets.only(bottom: 12),
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Column(
+                                children: [
+                                  ListTile(
+                                    title: Text(
+                                      patient.name.isNotEmpty
+                                          ? patient.name
+                                          : 'Pasien Tanpa Nama',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
                                       ),
                                     ),
-                                  );
-                                }),
-                              ],
+                                    subtitle: Text(
+                                      'RM: ${patient.rm} | Kamar: ${patient.room}',
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.content_copy,
+                                            color: Colors.blue,
+                                          ),
+                                          tooltip: 'Copy Pasien',
+                                          onPressed: () =>
+                                              _copySinglePatient(pIndex),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.add_alarm,
+                                            color: Colors.green,
+                                          ),
+                                          tooltip: 'Tambah TTV',
+                                          onPressed: () =>
+                                              _addVitalsToPatient(pIndex),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.delete,
+                                            color: Colors.red,
+                                          ),
+                                          tooltip: 'Hapus',
+                                          onPressed: () =>
+                                              _deletePatient(pIndex),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Divider(height: 1),
+                                  ...patient.vitals.asMap().entries.map((
+                                    entry,
+                                  ) {
+                                    int vIndex = entry.key;
+                                    VitalsEntry vitals = entry.value;
+                                    bool isEditingThis =
+                                        (_editingPatientIndex == pIndex &&
+                                        _editingVitalsIndex == vIndex);
+
+                                    return Container(
+                                      color: isEditingThis
+                                          ? Colors.orange.shade50
+                                          : Colors.transparent,
+                                      child: ListTile(
+                                        dense: true,
+                                        leading: const Icon(
+                                          Icons.monitor_heart,
+                                          color: Colors.teal,
+                                          size: 20,
+                                        ),
+                                        title: Text(
+                                          'Jam: ${vitals.time}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          'TD: ${vitals.bp} | HR: ${vitals.hr} | SpO2: ${vitals.spo2}%',
+                                        ),
+                                        trailing: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.edit,
+                                                color: Colors.blue,
+                                                size: 20,
+                                              ),
+                                              onPressed: () =>
+                                                  _editSpecificVitals(
+                                                    pIndex,
+                                                    vIndex,
+                                                  ),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.remove_circle_outline,
+                                                color: Colors.red,
+                                                size: 20,
+                                              ),
+                                              onPressed: () =>
+                                                  _deleteSpecificVitals(
+                                                    pIndex,
+                                                    vIndex,
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  }),
+                                ],
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
-              )
+                          );
+                        },
+                      ),
+              ),
             ],
           ),
         ),
       ),
-      
+
       body: Stack(
         children: [
-          SingleChildScrollView( 
+          SingleChildScrollView(
             padding: const EdgeInsets.all(24.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  _editingPatientIndex != null ? 'Edit Data Pasien' : 'Identitas Pasien',
+                  _editingPatientIndex != null
+                      ? 'Edit Data Pasien'
+                      : 'Identitas Pasien',
                   style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold, 
-                    color: _editingPatientIndex != null ? Colors.orange : Colors.teal
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _editingPatientIndex != null
+                        ? Colors.orange
+                        : Colors.teal,
                   ),
                 ),
                 const SizedBox(height: 16),
-                
+
                 Row(
                   children: [
                     Expanded(
                       flex: 1,
                       child: TextField(
                         controller: _roomController,
-                        decoration: const InputDecoration(labelText: 'Ruangan/Kamar', border: OutlineInputBorder()),
+                        decoration: const InputDecoration(
+                          labelText: 'Ruangan/Kamar',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -897,7 +1126,10 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       flex: 1,
                       child: TextField(
                         controller: _rmController,
-                        decoration: const InputDecoration(labelText: 'No. RM', border: OutlineInputBorder()),
+                        decoration: const InputDecoration(
+                          labelText: 'No. RM',
+                          border: OutlineInputBorder(),
+                        ),
                         keyboardType: TextInputType.number,
                       ),
                     ),
@@ -911,8 +1143,11 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       flex: 2,
                       child: TextField(
                         controller: _nameController,
-                        decoration: const InputDecoration(labelText: 'Nama Pasien', border: OutlineInputBorder()),
-                        textCapitalization: TextCapitalization.words, 
+                        decoration: const InputDecoration(
+                          labelText: 'Nama Pasien',
+                          border: OutlineInputBorder(),
+                        ),
+                        textCapitalization: TextCapitalization.words,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -920,19 +1155,29 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       flex: 1,
                       child: DropdownButtonFormField<String>(
                         isExpanded: true,
-                        value: _selectedGender,
-                        decoration: const InputDecoration(labelText: 'Gender', border: OutlineInputBorder()),
+                        initialValue: _selectedGender,
+                        decoration: const InputDecoration(
+                          labelText: 'Gender',
+                          border: OutlineInputBorder(),
+                        ),
                         items: _genderOptions.map((String gender) {
-                          return DropdownMenuItem<String>(value: gender, child: Text(gender, overflow: TextOverflow.ellipsis));
+                          return DropdownMenuItem<String>(
+                            value: gender,
+                            child: Text(
+                              gender,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
                         }).toList(),
-                        onChanged: (String? newValue) => setState(() => _selectedGender = newValue!),
+                        onChanged: (String? newValue) =>
+                            setState(() => _selectedGender = newValue!),
                       ),
                     ),
                   ],
                 ),
-                
+
                 const SizedBox(height: 24),
-                const Divider(), 
+                const Divider(),
                 const SizedBox(height: 16),
 
                 Row(
@@ -941,7 +1186,11 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       flex: 2,
                       child: Text(
                         'Tanda-Tanda Vital',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.teal),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.teal,
+                        ),
                       ),
                     ),
                     Expanded(
@@ -953,8 +1202,41 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                           border: OutlineInputBorder(),
                           prefixIcon: Icon(Icons.access_time, size: 18),
                         ),
-                        keyboardType: TextInputType.text, 
+                        keyboardType: TextInputType.text,
                       ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        value: _selectedSens,
+                        decoration: const InputDecoration(
+                          labelText: 'Sens',
+                          hintText: 'Pilih sens',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _sensOptions.map((String option) {
+                          return DropdownMenuItem<String>(
+                            value: option,
+                            child: Text(
+                              option,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (String? newValue) =>
+                            setState(() => _selectedSens = newValue),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () => setState(() => _selectedSens = null),
+                      tooltip: 'Clear Sens',
                     ),
                   ],
                 ),
@@ -962,25 +1244,40 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
 
                 TextField(
                   controller: _bpController,
-                  decoration: const InputDecoration(labelText: 'Tekanan Darah (TD)', suffixText: 'mmHg', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: 'Tekanan Darah (TD)',
+                    suffixText: 'mmHg',
+                    border: OutlineInputBorder(),
+                  ),
                   keyboardType: TextInputType.text,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
+                  ],
                 ),
                 const SizedBox(height: 16),
-                
+
                 TextField(
                   controller: _hrController,
-                  decoration: const InputDecoration(labelText: 'Heart Rate (HR)', suffixText: 'x/i', border: OutlineInputBorder()),
-                  keyboardType: TextInputType.number, 
-                ),
-                const SizedBox(height: 16),
-                
-                TextField(
-                  controller: _rrController,
-                  decoration: const InputDecoration(labelText: 'Respiratory Rate (RR)', suffixText: 'x/i', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: 'Heart Rate (HR)',
+                    suffixText: 'x/i',
+                    border: OutlineInputBorder(),
+                  ),
                   keyboardType: TextInputType.number,
                 ),
                 const SizedBox(height: 16),
-                
+
+                TextField(
+                  controller: _rrController,
+                  decoration: const InputDecoration(
+                    labelText: 'Respiratory Rate (RR)',
+                    suffixText: 'x/i',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 16),
+
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -988,25 +1285,37 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       flex: 2,
                       child: TextField(
                         controller: _spo2Controller,
-                        decoration: const InputDecoration(labelText: 'SpO2 ', suffixText: '%', border: OutlineInputBorder()),
+                        decoration: const InputDecoration(
+                          labelText: 'SpO2 ',
+                          suffixText: '%',
+                          border: OutlineInputBorder(),
+                        ),
                         keyboardType: TextInputType.number,
                       ),
                     ),
                     const SizedBox(width: 12),
-                    
+
                     Expanded(
                       flex: 3,
                       child: DropdownButtonFormField<String>(
                         isExpanded: true,
-                        value: _selectedO2Method,
-                        decoration: const InputDecoration(labelText: 'Oksigen', border: OutlineInputBorder()),
+                        initialValue: _selectedO2Method,
+                        decoration: const InputDecoration(
+                          labelText: 'Oksigen',
+                          border: OutlineInputBorder(),
+                        ),
                         items: _o2Options.map((String method) {
                           return DropdownMenuItem<String>(
                             value: method,
-                            child: Text(method, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
+                            child: Text(
+                              method,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 14),
+                            ),
                           );
                         }).toList(),
-                        onChanged: (String? newValue) => setState(() => _selectedO2Method = newValue!),
+                        onChanged: (String? newValue) =>
+                            setState(() => _selectedO2Method = newValue!),
                       ),
                     ),
 
@@ -1016,7 +1325,11 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                         flex: 2,
                         child: TextField(
                           controller: _lpmController,
-                          decoration: const InputDecoration(labelText: 'LPM', suffixText: 'lpm', border: OutlineInputBorder()),
+                          decoration: const InputDecoration(
+                            labelText: 'LPM',
+                            suffixText: 'lpm',
+                            border: OutlineInputBorder(),
+                          ),
                           keyboardType: TextInputType.number,
                         ),
                       ),
@@ -1028,10 +1341,16 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
 
                 TextField(
                   controller: _tempController,
-                  decoration: const InputDecoration(labelText: 'Temperature', suffixText: 'C', border: OutlineInputBorder()),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Temperature',
+                    suffixText: 'C',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                 ),
-                
+
                 const SizedBox(height: 16),
                 Container(
                   decoration: BoxDecoration(
@@ -1051,42 +1370,64 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                 setState(() {
                                   _isGdsChecked = value ?? false;
                                   if (!_isGdsChecked) {
-                                    _gdsProtocolMessage = null; // Clear warning if unchecked
+                                    _gdsProtocolMessage =
+                                        null; // Clear warning if unchecked
                                   }
                                 });
                               },
                             ),
-                            const Expanded(child: Text('Cek GDS', style: TextStyle(fontSize: 14))),
+                            const Expanded(
+                              child: Text(
+                                'Cek GDS',
+                                style: TextStyle(fontSize: 14),
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                      Container(width: 1, height: 30, color: Colors.grey.shade300), 
+                      Container(
+                        width: 1,
+                        height: 30,
+                        color: Colors.grey.shade300,
+                      ),
                       Expanded(
                         child: Row(
                           children: [
                             Checkbox(
                               value: _isOnIVDrug,
                               activeColor: Colors.teal,
-                              onChanged: (bool? value) => setState(() => _isOnIVDrug = value ?? false),
+                              onChanged: (bool? value) =>
+                                  setState(() => _isOnIVDrug = value ?? false),
                             ),
-                            const Expanded(child: Text('Obat IV / Pump', style: TextStyle(fontSize: 14))),
+                            const Expanded(
+                              child: Text(
+                                'Obat IV / Pump',
+                                style: TextStyle(fontSize: 14),
+                              ),
+                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                
+
                 if (_isGdsChecked || _isOnIVDrug) const SizedBox(height: 16),
-                
+
                 if (_isGdsChecked) ...[
                   TextField(
                     controller: _gdsController,
-                    decoration: const InputDecoration(labelText: 'Hasil GDS', suffixText: 'mg/dL', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: 'Hasil GDS',
+                      suffixText: 'mg/dL',
+                      border: OutlineInputBorder(),
+                    ),
                     keyboardType: TextInputType.number,
-                    onChanged: (value) => _evaluateGDSProtocol(value), // triggers the smart protocol evaluation!
+                    onChanged: (value) => _evaluateGDSProtocol(
+                      value,
+                    ), // triggers the smart protocol evaluation!
                   ),
-                  
+
                   // --- NEW UI: Smart Protocol Warning Card ---
                   if (_gdsProtocolMessage != null) ...[
                     const SizedBox(height: 8),
@@ -1100,15 +1441,22 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+                          const Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.orange,
+                            size: 28,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  _gdsProtocolMessage!, 
-                                  style: TextStyle(color: Colors.orange.shade900, fontWeight: FontWeight.bold),
+                                  _gdsProtocolMessage!,
+                                  style: TextStyle(
+                                    color: Colors.orange.shade900,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                                 if (_suggestedNovorapidRate != null) ...[
                                   const SizedBox(height: 8),
@@ -1116,24 +1464,31 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.orange,
                                       foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
                                       minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
                                     ),
                                     onPressed: () {
                                       // Auto-fill the IV section for the user!
                                       setState(() {
                                         _isOnIVDrug = true;
                                         _selectedIVDrug = 'Novorapid';
-                                        _ivRateController.text = _suggestedNovorapidRate!;
-                                        
+                                        _ivRateController.text =
+                                            _suggestedNovorapidRate!;
+
                                         // Hide the keyboard so they can see the filled result
-                                        FocusScope.of(context).unfocus(); 
+                                        FocusScope.of(context).unfocus();
                                       });
                                     },
-                                    child: const Text('Terapkan Dosis Novorapid'),
-                                  )
-                                ]
+                                    child: const Text(
+                                      'Terapkan Dosis Novorapid',
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -1152,15 +1507,23 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                         flex: 3,
                         child: DropdownButtonFormField<String>(
                           isExpanded: true,
-                          value: _selectedIVDrug,
-                          decoration: const InputDecoration(labelText: 'Nama Obat IV', border: OutlineInputBorder()),
+                          initialValue: _selectedIVDrug,
+                          decoration: const InputDecoration(
+                            labelText: 'Nama Obat IV',
+                            border: OutlineInputBorder(),
+                          ),
                           items: _ivDrugOptions.map((String drug) {
                             return DropdownMenuItem<String>(
                               value: drug,
-                              child: Text(drug, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
+                              child: Text(
+                                drug,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 14),
+                              ),
                             );
                           }).toList(),
-                          onChanged: (String? newValue) => setState(() => _selectedIVDrug = newValue!),
+                          onChanged: (String? newValue) =>
+                              setState(() => _selectedIVDrug = newValue!),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -1168,8 +1531,14 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                         flex: 2,
                         child: TextField(
                           controller: _ivRateController,
-                          decoration: const InputDecoration(labelText: 'Rate', suffixText: 'cc/jam', border: OutlineInputBorder()),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Rate',
+                            suffixText: 'cc/jam',
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
                         ),
                       ),
                     ],
@@ -1179,43 +1548,59 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 const SizedBox(height: 32),
 
                 OutlinedButton.icon(
-                  onPressed: _savePatient, 
-                  icon: Icon(_editingPatientIndex != null ? Icons.save_as : Icons.add),
+                  onPressed: _savePatient,
+                  icon: Icon(
+                    _editingPatientIndex != null ? Icons.save_as : Icons.add,
+                  ),
                   label: Text(
-                    _editingPatientIndex != null ? 'Update ke Antrean' : 'Simpan ke Antrean', 
-                    style: const TextStyle(fontSize: 16)
+                    _editingPatientIndex != null
+                        ? 'Update ke Antrean'
+                        : 'Simpan ke Antrean',
+                    style: const TextStyle(fontSize: 16),
                   ),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    minimumSize: const Size.fromHeight(50), 
+                    minimumSize: const Size.fromHeight(50),
                   ),
                 ),
-                
+
                 const SizedBox(height: 24),
-                
+
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.library_books, size: 18, color: Colors.teal),
+                    const Icon(
+                      Icons.library_books,
+                      size: 18,
+                      color: Colors.teal,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       'Siap di-copy: ${_savedPatientsList.length} Pasien',
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.teal),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.teal,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                
+
                 Row(
                   children: [
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: () => _copyAllToClipboard(useIzinFormat: false), 
+                        onPressed: () =>
+                            _copyAllToClipboard(useIzinFormat: false),
                         icon: const Icon(Icons.copy),
-                        label: const Text('Copy Standar', style: TextStyle(fontSize: 14)),
+                        label: const Text(
+                          'Copy Standar',
+                          style: TextStyle(fontSize: 14),
+                        ),
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          backgroundColor: Colors.teal.shade50, 
+                          backgroundColor: Colors.teal.shade50,
                           foregroundColor: Colors.teal.shade900,
                           elevation: 0,
                         ),
@@ -1224,15 +1609,21 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: () => _copyAllToClipboard(useIzinFormat: true), 
-                        icon: const Icon(Icons.send), 
-                        label: const Text('Copy + Izin', style: TextStyle(fontSize: 14)),
-                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                        onPressed: () =>
+                            _copyAllToClipboard(useIzinFormat: true),
+                        icon: const Icon(Icons.send),
+                        label: const Text(
+                          'Copy + Izin',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 80), 
+                const SizedBox(height: 80),
               ],
             ),
           ),
@@ -1245,10 +1636,10 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 setState(() {
                   _fabX += details.delta.dx;
                   _fabY += details.delta.dy;
-                  
+
                   final size = MediaQuery.of(context).size;
-                  _fabX = _fabX.clamp(0.0, size.width - 140.0); 
-                  _fabY = _fabY.clamp(0.0, size.height - 80.0); 
+                  _fabX = _fabX.clamp(0.0, size.width - 140.0);
+                  _fabY = _fabY.clamp(0.0, size.height - 80.0);
                 });
               },
               child: FloatingActionButton.extended(
