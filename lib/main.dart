@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 
 void main() {
   runApp(const VitalsApp());
@@ -19,8 +23,8 @@ class VitalsEntry {
   final bool isGdsChecked;
   final String gdsValue;
   final bool isOnIVDrug;
-  final String ivDrugName;
-  final String ivDrugRate;
+  final List<String> ivDrugNames;
+  final List<String> ivDrugRates;
 
   VitalsEntry({
     required this.time,
@@ -35,8 +39,8 @@ class VitalsEntry {
     required this.isGdsChecked,
     required this.gdsValue,
     required this.isOnIVDrug,
-    required this.ivDrugName,
-    required this.ivDrugRate,
+    required this.ivDrugNames,
+    required this.ivDrugRates,
   });
 
   String toFormattedString() {
@@ -72,12 +76,55 @@ class VitalsEntry {
 
     if (isGdsChecked && gdsValue.isNotEmpty) lines.add('GDS: $gdsValue mg/dL');
 
-    if (isOnIVDrug) {
-      String rate = ivDrugRate.isNotEmpty ? ' $ivDrugRate cc/jam' : '';
-      lines.add('Terpasang $ivDrugName$rate');
+    if (isOnIVDrug && ivDrugNames.isNotEmpty) {
+      for (int i = 0; i < ivDrugNames.length; i++) {
+        String rate = ivDrugRates.length > i && ivDrugRates[i].isNotEmpty
+            ? ' ${ivDrugRates[i]} cc/jam'
+            : '';
+        lines.add('Terpasang ${ivDrugNames[i]}$rate');
+      }
     }
 
     return lines.join('\n');
+  }
+
+  // JSON serialization methods
+  Map<String, dynamic> toJson() {
+    return {
+      'time': time,
+      'bp': bp,
+      'sens': sens,
+      'hr': hr,
+      'rr': rr,
+      'spo2': spo2,
+      'o2Method': o2Method,
+      'lpm': lpm,
+      'temp': temp,
+      'isGdsChecked': isGdsChecked,
+      'gdsValue': gdsValue,
+      'isOnIVDrug': isOnIVDrug,
+      'ivDrugNames': ivDrugNames,
+      'ivDrugRates': ivDrugRates,
+    };
+  }
+
+  factory VitalsEntry.fromJson(Map<String, dynamic> json) {
+    return VitalsEntry(
+      time: json['time'] ?? '',
+      bp: json['bp'] ?? '',
+      sens: json['sens'] ?? '',
+      hr: json['hr'] ?? '',
+      rr: json['rr'] ?? '',
+      spo2: json['spo2'] ?? '',
+      o2Method: json['o2Method'] ?? 'Room Air (RA)',
+      lpm: json['lpm'] ?? '',
+      temp: json['temp'] ?? '',
+      isGdsChecked: json['isGdsChecked'] ?? false,
+      gdsValue: json['gdsValue'] ?? '',
+      isOnIVDrug: json['isOnIVDrug'] ?? false,
+      ivDrugNames: List<String>.from(json['ivDrugNames'] ?? []),
+      ivDrugRates: List<String>.from(json['ivDrugRates'] ?? []),
+    );
   }
 }
 
@@ -133,6 +180,30 @@ TTV
 $vitalsStr
 '''
         .trim();
+  }
+
+  // JSON serialization methods
+  Map<String, dynamic> toJson() {
+    return {
+      'room': room,
+      'rm': rm,
+      'name': name,
+      'gender': gender,
+      'vitals': vitals.map((v) => v.toJson()).toList(),
+    };
+  }
+
+  factory PatientRecord.fromJson(Map<String, dynamic> json) {
+    return PatientRecord(
+      room: json['room'] ?? '',
+      rm: json['rm'] ?? '',
+      name: json['name'] ?? '',
+      gender: json['gender'] ?? 'Laki-laki (L)',
+      vitals: (json['vitals'] as List<dynamic>?)
+              ?.map((v) => VitalsEntry.fromJson(v as Map<String, dynamic>))
+              .toList() ??
+          [],
+    );
   }
 }
 
@@ -205,7 +276,10 @@ class _VitalsScreenState extends State<VitalsScreen> {
   String _selectedO2Method = 'Room Air (RA)';
 
   bool _isOnIVDrug = false;
-  final TextEditingController _ivRateController = TextEditingController();
+  final List<String> _ivDrugSelections = [];
+  final List<String> _ivDrugRates = [];
+  final List<String?> _customIVDrugs = [];
+  final List<TextEditingController> _ivRateControllers = [];
   final List<String> _ivDrugOptions = [
     'Novorapid',
     'Norepinephrine',
@@ -215,8 +289,6 @@ class _VitalsScreenState extends State<VitalsScreen> {
     'Dobutamine',
     'Lainnya',
   ];
-  String _selectedIVDrug = 'Novorapid';
-  String? _customIVDrug;
 
   // --- NEW: Hyperglycemia Protocol Variables ---
   String? _gdsProtocolMessage;
@@ -263,6 +335,43 @@ Pada follow up KGD 1 jam kemudian, jika KGD >100, lanjutkan D10% 20 gtt/menit, d
 Jika pada follow up KGD per 4 jam berikutnya, KGD >200, aff cairan D10% dan ganti dengan NaCl 0.9% maintenance.
 
 Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."''';
+    _loadPatientsData();
+  }
+
+  Future<void> _loadPatientsData() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File(path.join(directory.path, 'patients_data.json'));
+
+      if (await file.exists()) {
+        final contents = await file.readAsString();
+        final List<dynamic> jsonData = json.decode(contents);
+
+        setState(() {
+          _savedPatientsList.clear();
+          _savedPatientsList.addAll(
+            jsonData.map((item) => PatientRecord.fromJson(item)).toList(),
+          );
+        });
+      }
+    } catch (e) {
+      // If loading fails, continue with empty list
+      print('Error loading patient data: $e');
+    }
+  }
+
+  Future<void> _savePatientsData() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File(path.join(directory.path, 'patients_data.json'));
+
+      final jsonData = _savedPatientsList.map((patient) => patient.toJson()).toList();
+      final contents = json.encode(jsonData);
+
+      await file.writeAsString(contents);
+    } catch (e) {
+      print('Error saving patient data: $e');
+    }
   }
 
   String _getCurrentTime() {
@@ -363,7 +472,10 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _tempController.clear();
     _lpmController.clear();
     _gdsController.clear();
-    _ivRateController.clear();
+    for (var controller in _ivRateControllers) {
+      controller.dispose();
+    }
+    _ivRateControllers.clear();
     _timeController.text = _getCurrentTime();
 
     setState(() {
@@ -372,8 +484,9 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _selectedO2Method = 'Room Air (RA)';
       _isGdsChecked = false;
       _isOnIVDrug = false;
-      _selectedIVDrug = 'Novorapid';
-      _customIVDrug = null;
+      _ivDrugSelections.clear();
+      _ivDrugRates.clear();
+      _customIVDrugs.clear();
       _editingPatientIndex = null;
       _editingVitalsIndex = null;
       _gdsProtocolMessage = null; // Clear protocol warning
@@ -383,6 +496,17 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
 
   void _savePatient() {
     if (_nameController.text.isEmpty && _rmController.text.isEmpty) return;
+
+    final List<String> ivDrugNames = [];
+    final List<String> ivDrugRates = [];
+    for (int i = 0; i < _ivDrugSelections.length; i++) {
+      final name = _ivDrugSelections[i] == 'Lainnya'
+          ? (_customIVDrugs[i] ?? '')
+          : _ivDrugSelections[i];
+      final rate = _ivDrugRates[i];
+      ivDrugNames.add(name);
+      ivDrugRates.add(rate);
+    }
 
     final newVitals = VitalsEntry(
       time: _formatTime(_timeController.text),
@@ -397,10 +521,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       isGdsChecked: _isGdsChecked,
       gdsValue: _gdsController.text,
       isOnIVDrug: _isOnIVDrug,
-      ivDrugName: _selectedIVDrug == 'Lainnya'
-          ? (_customIVDrug ?? '')
-          : _selectedIVDrug,
-      ivDrugRate: _ivRateController.text,
+      ivDrugNames: ivDrugNames,
+      ivDrugRates: ivDrugRates,
     );
 
     setState(() {
@@ -444,6 +566,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       }
     });
 
+    _savePatientsData();
+
     _clearForm();
     FocusScope.of(context).unfocus();
 
@@ -478,13 +602,17 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _tempController.clear();
       _lpmController.clear();
       _gdsController.clear();
-      _ivRateController.clear();
+      for (var controller in _ivRateControllers) {
+        controller.dispose();
+      }
+      _ivRateControllers.clear();
 
       _isGdsChecked = false;
       _isOnIVDrug = false;
       _selectedO2Method = 'Room Air (RA)';
-      _selectedIVDrug = 'Novorapid';
-      _customIVDrug = null;
+      _ivDrugSelections.clear();
+      _ivDrugRates.clear();
+      _customIVDrugs.clear();
       _timeController.text = _getCurrentTime();
       _gdsProtocolMessage = null;
       _suggestedNovorapidRate = null;
@@ -520,14 +648,28 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _gdsController.text = vitalsToEdit.gdsValue;
 
       _isOnIVDrug = vitalsToEdit.isOnIVDrug;
-      if (_ivDrugOptions.contains(vitalsToEdit.ivDrugName)) {
-        _selectedIVDrug = vitalsToEdit.ivDrugName;
-        _customIVDrug = null;
-      } else {
-        _selectedIVDrug = 'Lainnya';
-        _customIVDrug = vitalsToEdit.ivDrugName;
+      _ivDrugSelections.clear();
+      _ivDrugRates.clear();
+      _customIVDrugs.clear();
+      for (var controller in _ivRateControllers) {
+        controller.dispose();
       }
-      _ivRateController.text = vitalsToEdit.ivDrugRate;
+      _ivRateControllers.clear();
+      for (int i = 0; i < vitalsToEdit.ivDrugNames.length; i++) {
+        final name = vitalsToEdit.ivDrugNames[i];
+        final rate = vitalsToEdit.ivDrugRates.length > i
+            ? vitalsToEdit.ivDrugRates[i]
+            : '';
+        if (_ivDrugOptions.contains(name)) {
+          _ivDrugSelections.add(name);
+          _customIVDrugs.add(null);
+        } else {
+          _ivDrugSelections.add('Lainnya');
+          _customIVDrugs.add(name);
+        }
+        _ivDrugRates.add(rate);
+        _ivRateControllers.add(TextEditingController(text: rate));
+      }
 
       // Re-evaluate protocol when loading old data
       _evaluateGDSProtocol(vitalsToEdit.gdsValue);
@@ -539,6 +681,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _savedPatientsList.removeAt(index);
       if (_editingPatientIndex == index) _clearForm();
     });
+    _savePatientsData();
   }
 
   void _deleteSpecificVitals(int pIndex, int vIndex) {
@@ -547,9 +690,11 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       if (_savedPatientsList[pIndex].vitals.isEmpty) {
         _savedPatientsList.removeAt(pIndex);
       }
-      if (_editingPatientIndex == pIndex && _editingVitalsIndex == vIndex)
+      if (_editingPatientIndex == pIndex && _editingVitalsIndex == vIndex) {
         _clearForm();
+      }
     });
+    _savePatientsData();
   }
 
   void _resetAll() {
@@ -571,6 +716,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 _savedPatientsList.clear();
                 _clearForm();
               });
+              _savePatientsData();
               Navigator.pop(context);
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -827,8 +973,9 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
   }
 
   void _copyAllToClipboard({bool useIzinFormat = false}) {
-    if (_nameController.text.isNotEmpty || _rmController.text.isNotEmpty)
+    if (_nameController.text.isNotEmpty || _rmController.text.isNotEmpty) {
       _savePatient();
+    }
 
     if (_savedPatientsList.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -857,6 +1004,25 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
         duration: const Duration(seconds: 2),
       ),
     );
+  }
+
+  void _addIVDrug() {
+    setState(() {
+      _ivDrugSelections.add('Novorapid');
+      _ivDrugRates.add('');
+      _customIVDrugs.add(null);
+      _ivRateControllers.add(TextEditingController());
+    });
+  }
+
+  void _removeIVDrug(int index) {
+    setState(() {
+      _ivDrugSelections.removeAt(index);
+      _ivDrugRates.removeAt(index);
+      _customIVDrugs.removeAt(index);
+      _ivRateControllers[index].dispose();
+      _ivRateControllers.removeAt(index);
+    });
   }
 
   void _copySinglePatient(int index) {
@@ -888,7 +1054,9 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _tempController.dispose();
     _lpmController.dispose();
     _gdsController.dispose();
-    _ivRateController.dispose();
+    for (var controller in _ivRateControllers) {
+      controller.dispose();
+    }
     _notesController.dispose(); // NEW: Dispose notes controller
     super.dispose();
   }
@@ -1225,7 +1393,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         isExpanded: true,
-                        value: _selectedSens,
+                        initialValue: _selectedSens,
                         decoration: const InputDecoration(
                           labelText: 'Sens',
                           hintText: 'Pilih sens',
@@ -1487,8 +1655,13 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                       // Auto-fill the IV section for the user!
                                       setState(() {
                                         _isOnIVDrug = true;
-                                        _selectedIVDrug = 'Novorapid';
-                                        _ivRateController.text =
+                                        if (_ivDrugSelections.isEmpty) {
+                                          _addIVDrug();
+                                        }
+                                        _ivDrugSelections[0] = 'Novorapid';
+                                        _ivDrugRates[0] =
+                                            _suggestedNovorapidRate!;
+                                        _ivRateControllers[0].text =
                                             _suggestedNovorapidRate!;
 
                                         // Hide the keyboard so they can see the filled result
@@ -1511,62 +1684,107 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 ],
 
                 if (_isOnIVDrug) ...[
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  Column(
                     children: [
-                      Expanded(
-                        flex: 3,
-                        child: DropdownButtonFormField<String>(
-                          isExpanded: true,
-                          initialValue: _selectedIVDrug,
-                          decoration: const InputDecoration(
-                            labelText: 'Nama Obat IV',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: _ivDrugOptions.map((String drug) {
-                            return DropdownMenuItem<String>(
-                              value: drug,
-                              child: Text(
-                                drug,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 14),
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _ivDrugSelections.length,
+                        itemBuilder: (context, index) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: DropdownButtonFormField<String>(
+                                    isExpanded: true,
+                                    initialValue: _ivDrugSelections[index],
+                                    decoration: const InputDecoration(
+                                      labelText: 'Nama Obat IV',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    items: _ivDrugOptions.map((String drug) {
+                                      return DropdownMenuItem<String>(
+                                        value: drug,
+                                        child: Text(
+                                          drug,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(fontSize: 14),
+                                        ),
+                                      );
+                                    }).toList(),
+                                    onChanged: (String? newValue) => setState(
+                                      () =>
+                                          _ivDrugSelections[index] = newValue!,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  flex: 2,
+                                  child: TextField(
+                                    controller: _ivRateControllers[index],
+                                    decoration: const InputDecoration(
+                                      labelText: 'Rate',
+                                      suffixText: 'cc/jam',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    onChanged: (value) =>
+                                        _ivDrugRates[index] = value,
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.remove_circle_outline,
+                                    color: Colors.red,
+                                  ),
+                                  onPressed: () => _removeIVDrug(index),
+                                  tooltip: 'Hapus Obat',
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _addIVDrug,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Tambah Obat IV'),
+                      ),
+
+                      // Custom fields for 'Lainnya'
+                      ..._ivDrugSelections
+                          .asMap()
+                          .entries
+                          .where((entry) => entry.value == 'Lainnya')
+                          .map((entry) {
+                            int index = entry.key;
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8.0),
+                              child: TextField(
+                                onChanged: (value) => setState(
+                                  () => _customIVDrugs[index] = value,
+                                ),
+                                decoration: InputDecoration(
+                                  labelText:
+                                      'Nama Obat IV Lainnya (${index + 1})',
+                                  border: const OutlineInputBorder(),
+                                ),
+                                controller: TextEditingController(
+                                  text: _customIVDrugs[index],
+                                ),
                               ),
                             );
-                          }).toList(),
-                          onChanged: (String? newValue) =>
-                              setState(() => _selectedIVDrug = newValue!),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: _ivRateController,
-                          decoration: const InputDecoration(
-                            labelText: 'Rate',
-                            suffixText: 'cc/jam',
-                            border: OutlineInputBorder(),
-                          ),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                        ),
-                      ),
+                          }),
                     ],
                   ),
-
-                  if (_selectedIVDrug == 'Lainnya') ...[
-                    const SizedBox(height: 16),
-                    TextField(
-                      onChanged: (value) =>
-                          setState(() => _customIVDrug = value),
-                      decoration: const InputDecoration(
-                        labelText: 'Nama Obat IV Lainnya',
-                        border: OutlineInputBorder(),
-                      ),
-                      controller: TextEditingController(text: _customIVDrug),
-                    ),
-                  ],
                 ],
 
                 const SizedBox(height: 32),
