@@ -216,6 +216,7 @@ class _VitalsScreenState extends State<VitalsScreen> {
     'Lainnya',
   ];
   String _selectedIVDrug = 'Novorapid';
+  String? _customIVDrug;
 
   // --- NEW: Hyperglycemia Protocol Variables ---
   String? _gdsProtocolMessage;
@@ -372,6 +373,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _isGdsChecked = false;
       _isOnIVDrug = false;
       _selectedIVDrug = 'Novorapid';
+      _customIVDrug = null;
       _editingPatientIndex = null;
       _editingVitalsIndex = null;
       _gdsProtocolMessage = null; // Clear protocol warning
@@ -395,7 +397,9 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       isGdsChecked: _isGdsChecked,
       gdsValue: _gdsController.text,
       isOnIVDrug: _isOnIVDrug,
-      ivDrugName: _selectedIVDrug,
+      ivDrugName: _selectedIVDrug == 'Lainnya'
+          ? (_customIVDrug ?? '')
+          : _selectedIVDrug,
       ivDrugRate: _ivRateController.text,
     );
 
@@ -480,6 +484,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _isOnIVDrug = false;
       _selectedO2Method = 'Room Air (RA)';
       _selectedIVDrug = 'Novorapid';
+      _customIVDrug = null;
       _timeController.text = _getCurrentTime();
       _gdsProtocolMessage = null;
       _suggestedNovorapidRate = null;
@@ -515,7 +520,13 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _gdsController.text = vitalsToEdit.gdsValue;
 
       _isOnIVDrug = vitalsToEdit.isOnIVDrug;
-      _selectedIVDrug = vitalsToEdit.ivDrugName;
+      if (_ivDrugOptions.contains(vitalsToEdit.ivDrugName)) {
+        _selectedIVDrug = vitalsToEdit.ivDrugName;
+        _customIVDrug = null;
+      } else {
+        _selectedIVDrug = 'Lainnya';
+        _customIVDrug = vitalsToEdit.ivDrugName;
+      }
       _ivRateController.text = vitalsToEdit.ivDrugRate;
 
       // Re-evaluate protocol when loading old data
@@ -1543,6 +1554,19 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       ),
                     ],
                   ),
+
+                  if (_selectedIVDrug == 'Lainnya') ...[
+                    const SizedBox(height: 16),
+                    TextField(
+                      onChanged: (value) =>
+                          setState(() => _customIVDrug = value),
+                      decoration: const InputDecoration(
+                        labelText: 'Nama Obat IV Lainnya',
+                        border: OutlineInputBorder(),
+                      ),
+                      controller: TextEditingController(text: _customIVDrug),
+                    ),
+                  ],
                 ],
 
                 const SizedBox(height: 32),
