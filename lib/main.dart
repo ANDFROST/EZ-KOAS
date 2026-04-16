@@ -245,6 +245,9 @@ class _VitalsScreenState extends State<VitalsScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _rmController = TextEditingController();
 
+  // Keluhan controller
+  final TextEditingController _keluhanController = TextEditingController();
+
   final List<String> _genderOptions = ['Laki-laki (L)', 'Perempuan (P)'];
   String _selectedGender = 'Laki-laki (L)';
 
@@ -270,7 +273,7 @@ class _VitalsScreenState extends State<VitalsScreen> {
 
   final List<String> _o2Options = [
     'Room Air (RA)',
-    'Nasal Cannula (NK)',
+    'Nasal Cannula (NK)'
     'Non Rebreathing Mask (NRM)',
   ];
   String _selectedO2Method = 'Room Air (RA)';
@@ -303,6 +306,8 @@ class _VitalsScreenState extends State<VitalsScreen> {
   void initState() {
     super.initState();
     _timeController.text = _getCurrentTime();
+
+    _keluhanController.clear();
 
     // Initialize notes with medical protocols
     _notesController.text = '''Protokol Hiperglikemia
@@ -478,6 +483,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _ivRateControllers.clear();
     _timeController.text = _getCurrentTime();
 
+    _keluhanController.clear();
+
     setState(() {
       _selectedGender = 'Laki-laki (L)';
       _selectedSens = null;
@@ -595,6 +602,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _selectedGender = patient.gender;
       _selectedSens = null;
 
+      _keluhanController.clear();
+
       _bpController.clear();
       _hrController.clear();
       _rrController.clear();
@@ -633,6 +642,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _rmController.text = patient.rm;
       _nameController.text = patient.name;
       _selectedGender = patient.gender;
+
+      _keluhanController.clear(); // Not stored yet
 
       _timeController.text = vitalsToEdit.time;
       _bpController.text = vitalsToEdit.bp;
@@ -1058,6 +1069,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       controller.dispose();
     }
     _notesController.dispose(); // NEW: Dispose notes controller
+    _keluhanController.dispose();
     super.dispose();
   }
 
@@ -1150,6 +1162,17 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                   ListTile(
                                     title: Text(
                                       patient.name.isNotEmpty
+
+                      // --- Keluhan field ---
+                      TextField(
+                        controller: _keluhanController,
+                        decoration: const InputDecoration(
+                          labelText: 'Keluhan',
+                          border: OutlineInputBorder(),
+                        ),
+                        textCapitalization: TextCapitalization.sentences,
+                      ),
+                      const SizedBox(height: 16),
                                           ? patient.name
                                           : 'Pasien Tanpa Nama',
                                       style: const TextStyle(
