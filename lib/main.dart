@@ -1554,6 +1554,25 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 ),
 
                 const SizedBox(height: 16),
+                // Add a controller for UOP
+                TextEditingController _uopController = TextEditingController();
+
+                // Clear UOP field in _clearForm
+                _uopController.clear();
+
+                // Dispose UOP controller in dispose
+                _uopController.dispose();
+
+                TextField(
+                  controller: _uopController,
+                  decoration: const InputDecoration(
+                    labelText: 'UOP (Urine Output)',
+                    suffixText: 'ml',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 16),
                 Container(
                   decoration: BoxDecoration(
                     border: Border.all(color: Colors.grey.shade400),
