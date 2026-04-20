@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -25,6 +26,7 @@ class VitalsEntry {
   final bool isOnIVDrug;
   final List<String> ivDrugNames;
   final List<String> ivDrugRates;
+  final String keluhan;
 
   VitalsEntry({
     required this.time,
@@ -41,12 +43,14 @@ class VitalsEntry {
     required this.isOnIVDrug,
     required this.ivDrugNames,
     required this.ivDrugRates,
+    required this.keluhan,
   });
 
   String toFormattedString() {
     List<String> lines = [];
 
     if (time.isNotEmpty) lines.add('($time)');
+    if (keluhan.isNotEmpty) lines.add('Keluhan: $keluhan');
     if (sens.isNotEmpty) {
       final sensLabel = sens == 'Compos mentis' ? 'CM' : sens;
       lines.add('Sens: $sensLabel');
@@ -59,10 +63,11 @@ class VitalsEntry {
       String o2Abbr = '';
       if (o2Method == 'Room Air (RA)') {
         o2Abbr = 'RA';
-      } else if (o2Method == 'Nasal Cannula (NK)')
+      } else if (o2Method == 'Nasal Cannula (NK)') {
         o2Abbr = 'NK';
-      else if (o2Method == 'Non Rebreathing Mask (NRM)')
+      } else if (o2Method == 'Non Rebreathing Mask (NRM)') {
         o2Abbr = 'NRM';
+      }
 
       if (o2Abbr == 'RA') {
         lines.add('SpO2: $spo2% $o2Abbr');
@@ -105,6 +110,7 @@ class VitalsEntry {
       'isOnIVDrug': isOnIVDrug,
       'ivDrugNames': ivDrugNames,
       'ivDrugRates': ivDrugRates,
+      'keluhan': keluhan,
     };
   }
 
@@ -124,6 +130,7 @@ class VitalsEntry {
       isOnIVDrug: json['isOnIVDrug'] ?? false,
       ivDrugNames: List<String>.from(json['ivDrugNames'] ?? []),
       ivDrugRates: List<String>.from(json['ivDrugRates'] ?? []),
+      keluhan: json['keluhan'] ?? '',
     );
   }
 }
@@ -134,6 +141,7 @@ class PatientRecord {
   String rm;
   String name;
   String gender;
+  String age; // NEW: Added age property
   List<VitalsEntry> vitals;
 
   PatientRecord({
@@ -141,6 +149,7 @@ class PatientRecord {
     required this.rm,
     required this.name,
     required this.gender,
+    required this.age,
     required this.vitals,
   });
 
@@ -167,10 +176,18 @@ class PatientRecord {
     if (name.isNotEmpty) headerParts.add(name);
 
     headerParts.add(gender == 'Laki-laki (L)' ? 'L' : 'P');
+    
+    // Include Age in the formatted output
+    if (age.isNotEmpty) {
+      String ageStr = age.toLowerCase().contains('thn') || age.toLowerCase().contains('tahun') 
+          ? age 
+          : '$age thn';
+      headerParts.add(ageStr);
+    }
 
     if (rm.isNotEmpty) headerParts.add(rm);
 
-    String header = headerParts.join('/');
+    String header = headerParts.join(' / ');
     String vitalsStr = vitals.map((v) => v.toFormattedString()).join('\n\n');
 
     return '''
@@ -189,6 +206,7 @@ $vitalsStr
       'rm': rm,
       'name': name,
       'gender': gender,
+      'age': age,
       'vitals': vitals.map((v) => v.toJson()).toList(),
     };
   }
@@ -199,6 +217,7 @@ $vitalsStr
       rm: json['rm'] ?? '',
       name: json['name'] ?? '',
       gender: json['gender'] ?? 'Laki-laki (L)',
+      age: json['age'] ?? '', // Fallback for older saved data
       vitals: (json['vitals'] as List<dynamic>?)
               ?.map((v) => VitalsEntry.fromJson(v as Map<String, dynamic>))
               .toList() ??
@@ -231,6 +250,123 @@ class VitalsScreen extends StatefulWidget {
 }
 
 class _VitalsScreenState extends State<VitalsScreen> {
+  // --- SEARCH VARIABLES ---
+  bool _isSearchMode = false;
+  bool _isSearching = false;
+  final TextEditingController _searchNameController = TextEditingController();
+  final TextEditingController _searchRmController = TextEditingController();
+  final TextEditingController _searchRoomController = TextEditingController();
+
+  // Google Apps Script Web App URL for Sheets API
+  final String _sheetApiUrl =
+      'https://script.google.com/macros/s/AKfycbxzLPBdLsAb1ht-VecBhFW_5Jp00h3b_lhCM_nBXuuUHO5vD8EpWA-xnIl8gKvssROR0g/exec';
+
+  Future<bool> _searchAndFillFromSheet({String? nama, String? rm, String? ruang}) async {
+    String url = _sheetApiUrl;
+    Map<String, String?> params = {};
+    if (nama != null && nama.isNotEmpty) {
+      params['Nama'] = nama;
+    } else if (rm != null && rm.isNotEmpty) {
+      params['No RM'] = rm;
+    } else if (ruang != null && ruang.isNotEmpty) {
+      params['Ruang Rawat'] = ruang;
+    }
+
+    if (params.isNotEmpty) {
+      url += '?' +
+          params.entries
+              .map((e) =>
+                  Uri.encodeComponent(e.key) + '=' + Uri.encodeComponent(e.value ?? ''))
+              .join('&');
+    } else {
+      return false; 
+    }
+
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        if (data.isNotEmpty) {
+          final row = data[0] as Map<String, dynamic>;
+          
+          setState(() {
+            // 1. Map Nama
+            _nameController.text = row['Nama']?.toString() ?? '';
+            
+            // 2. Map No RM
+            _rmController.text = row['No RM']?.toString() ?? row['No. RM']?.toString() ?? row['RM']?.toString() ?? '';
+            
+            // 3. Map Ruang Rawat
+            _roomController.text = row['Ruang Rawat']?.toString() ?? '';
+
+            // 4. Map Umur
+            _ageController.text = row['Umur']?.toString() ?? row['Usia']?.toString() ?? '';
+
+            // 5. Map Jenis Kelamin (Smart Logic)
+            String sheetGender = (row['Jenis Kelamin']?.toString() ?? '').trim().toLowerCase();
+            if (sheetGender == 'l' || sheetGender.contains('laki') || sheetGender == 'pria') {
+              _selectedGender = 'Laki-laki (L)';
+            } else if (sheetGender == 'p' || sheetGender.contains('perempuan') || sheetGender.contains('wanita')) {
+              _selectedGender = 'Perempuan (P)';
+            }
+          });
+          return true; // Match found
+        }
+      }
+    } catch (e) {
+      print('Error parsing sheet: $e');
+    }
+    return false; // No match found
+  }
+
+  Future<void> _performSearch() async {
+    FocusScope.of(context).unfocus();
+    
+    String nama = _searchNameController.text.trim();
+    String rm = _searchRmController.text.trim();
+    String ruang = _searchRoomController.text.trim();
+
+    if (nama.isEmpty && rm.isEmpty && ruang.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Harap isi minimal satu kolom untuk mencari.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSearching = true;
+    });
+
+    bool isFound = await _searchAndFillFromSheet(nama: nama, rm: rm, ruang: ruang);
+
+    setState(() {
+      _isSearching = false;
+    });
+
+    if (isFound) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Data berhasil ditemukan dan diisi!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      setState(() {
+        _isSearchMode = false;
+        _searchNameController.clear();
+        _searchRmController.clear();
+        _searchRoomController.clear();
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nothing found (Data tidak ditemukan)'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  final TextEditingController _keluhanController = TextEditingController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   double _fabX = 0;
   double _fabY = 0;
@@ -244,9 +380,7 @@ class _VitalsScreenState extends State<VitalsScreen> {
   final TextEditingController _roomController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _rmController = TextEditingController();
-
-  // Keluhan controller
-  final TextEditingController _keluhanController = TextEditingController();
+  final TextEditingController _ageController = TextEditingController(); // NEW
 
   final List<String> _genderOptions = ['Laki-laki (L)', 'Perempuan (P)'];
   String _selectedGender = 'Laki-laki (L)';
@@ -273,7 +407,7 @@ class _VitalsScreenState extends State<VitalsScreen> {
 
   final List<String> _o2Options = [
     'Room Air (RA)',
-    'Nasal Cannula (NK)'
+    'Nasal Cannula (NK)',
     'Non Rebreathing Mask (NRM)',
   ];
   String _selectedO2Method = 'Room Air (RA)';
@@ -293,11 +427,11 @@ class _VitalsScreenState extends State<VitalsScreen> {
     'Lainnya',
   ];
 
-  // --- NEW: Hyperglycemia Protocol Variables ---
+  // --- Hyperglycemia Protocol Variables ---
   String? _gdsProtocolMessage;
   String? _suggestedNovorapidRate;
 
-  // --- NEW: Notes Section Variables ---
+  // --- Notes Section Variables ---
   final TextEditingController _notesController = TextEditingController();
   bool _isHyperglycemiaExpanded = false;
   bool _isHypoglycemiaExpanded = false;
@@ -307,9 +441,6 @@ class _VitalsScreenState extends State<VitalsScreen> {
     super.initState();
     _timeController.text = _getCurrentTime();
 
-    _keluhanController.clear();
-
-    // Initialize notes with medical protocols
     _notesController.text = '''Protokol Hiperglikemia
 "Protokol Hiperglikemia jika GDS di atas 200
 Drip Novorapid 50 unit dalam 50cc NaCl 0.9% dalam syringe pump --> Start 3 cc/jam
@@ -360,7 +491,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
         });
       }
     } catch (e) {
-      // If loading fails, continue with empty list
       print('Error loading patient data: $e');
     }
   }
@@ -370,7 +500,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       final directory = await getApplicationDocumentsDirectory();
       final file = File(path.join(directory.path, 'patients_data.json'));
 
-      final jsonData = _savedPatientsList.map((patient) => patient.toJson()).toList();
+      final jsonData =
+          _savedPatientsList.map((patient) => patient.toJson()).toList();
       final contents = json.encode(jsonData);
 
       await file.writeAsString(contents);
@@ -403,7 +534,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     return sanitized;
   }
 
-  // --- NEW: Logic to analyze GDS based on your protocol ---
   void _evaluateGDSProtocol(String gdsInput) {
     double? gds = double.tryParse(gdsInput);
 
@@ -456,7 +586,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     } else if (gds > 450) {
       message =
           'PERINGATAN: GDS > 450!\nNaikkan dosis 1 cc/jam.\nFollow-up GDS PER 1 JAM sampai < 400.';
-      // We don't auto-set rate here because it depends on their previous rate + 1
       rate = null;
     }
 
@@ -470,6 +599,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _roomController.clear();
     _nameController.clear();
     _rmController.clear();
+    _ageController.clear(); // Cleared age
+    _keluhanController.clear();
     _bpController.clear();
     _hrController.clear();
     _rrController.clear();
@@ -483,8 +614,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _ivRateControllers.clear();
     _timeController.text = _getCurrentTime();
 
-    _keluhanController.clear();
-
     setState(() {
       _selectedGender = 'Laki-laki (L)';
       _selectedSens = null;
@@ -496,7 +625,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _customIVDrugs.clear();
       _editingPatientIndex = null;
       _editingVitalsIndex = null;
-      _gdsProtocolMessage = null; // Clear protocol warning
+      _gdsProtocolMessage = null;
       _suggestedNovorapidRate = null;
     });
   }
@@ -530,6 +659,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       isOnIVDrug: _isOnIVDrug,
       ivDrugNames: ivDrugNames,
       ivDrugRates: ivDrugRates,
+      keluhan: _keluhanController.text,
     );
 
     setState(() {
@@ -538,14 +668,15 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
         _savedPatientsList[_editingPatientIndex!].rm = _rmController.text;
         _savedPatientsList[_editingPatientIndex!].name = _nameController.text;
         _savedPatientsList[_editingPatientIndex!].gender = _selectedGender;
-        _savedPatientsList[_editingPatientIndex!].vitals[_editingVitalsIndex!] =
-            newVitals;
+        _savedPatientsList[_editingPatientIndex!].age = _ageController.text;
+        _savedPatientsList[_editingPatientIndex!].vitals[_editingVitalsIndex!] = newVitals;
         _savedPatientsList[_editingPatientIndex!].sortVitals();
       } else if (_editingPatientIndex != null && _editingVitalsIndex == null) {
         _savedPatientsList[_editingPatientIndex!].room = _roomController.text;
         _savedPatientsList[_editingPatientIndex!].rm = _rmController.text;
         _savedPatientsList[_editingPatientIndex!].name = _nameController.text;
         _savedPatientsList[_editingPatientIndex!].gender = _selectedGender;
+        _savedPatientsList[_editingPatientIndex!].age = _ageController.text;
         _savedPatientsList[_editingPatientIndex!].vitals.add(newVitals);
         _savedPatientsList[_editingPatientIndex!].sortVitals();
       } else {
@@ -566,6 +697,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
               rm: _rmController.text,
               name: _nameController.text,
               gender: _selectedGender,
+              age: _ageController.text,
               vitals: [newVitals],
             ),
           );
@@ -599,9 +731,9 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _roomController.text = patient.room;
       _rmController.text = patient.rm;
       _nameController.text = patient.name;
+      _ageController.text = patient.age; // Load age
       _selectedGender = patient.gender;
       _selectedSens = null;
-
       _keluhanController.clear();
 
       _bpController.clear();
@@ -641,13 +773,17 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       _roomController.text = patient.room;
       _rmController.text = patient.rm;
       _nameController.text = patient.name;
-      _selectedGender = patient.gender;
-
-      _keluhanController.clear(); // Not stored yet
+      _ageController.text = patient.age; // Load age
+      _selectedGender = _genderOptions.contains(patient.gender)
+          ? patient.gender
+          : 'Laki-laki (L)';
 
       _timeController.text = vitalsToEdit.time;
+      _keluhanController.text = vitalsToEdit.keluhan;
       _bpController.text = vitalsToEdit.bp;
-      _selectedSens = vitalsToEdit.sens;
+      _selectedSens = _sensOptions.contains(vitalsToEdit.sens)
+          ? vitalsToEdit.sens
+          : null;
       _hrController.text = vitalsToEdit.hr;
       _rrController.text = vitalsToEdit.rr;
       _spo2Controller.text = vitalsToEdit.spo2;
@@ -682,7 +818,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
         _ivRateControllers.add(TextEditingController(text: rate));
       }
 
-      // Re-evaluate protocol when loading old data
       _evaluateGDSProtocol(vitalsToEdit.gdsValue);
     });
   }
@@ -750,13 +885,11 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            // Parse notes content to separate protocols
             String notesContent = _notesController.text;
             String hyperglycemiaProtocol = '';
             String hypoglycemiaProtocol = '';
             String generalNotes = '';
 
-            // Extract hyperglycemia protocol
             int hyperStart = notesContent.indexOf('Protokol Hiperglikemia');
             int hyperEnd = notesContent.indexOf('Protokol Hipoglikemia');
             if (hyperStart != -1 && hyperEnd != -1) {
@@ -767,13 +900,11 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
               hyperglycemiaProtocol = notesContent.substring(hyperStart).trim();
             }
 
-            // Extract hypoglycemia protocol
             int hypoStart = notesContent.indexOf('Protokol Hipoglikemia');
             if (hypoStart != -1) {
               hypoglycemiaProtocol = notesContent.substring(hypoStart).trim();
             }
 
-            // Extract general notes (everything before protocols or after)
             if (hyperStart > 0) {
               generalNotes = notesContent.substring(0, hyperStart).trim();
             }
@@ -785,7 +916,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 height: MediaQuery.of(context).size.height * 0.8,
                 child: Column(
                   children: [
-                    // Header
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -812,14 +942,12 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                         ],
                       ),
                     ),
-                    // Content
                     Expanded(
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // General Notes Section
                             if (generalNotes.isNotEmpty) ...[
                               const Text(
                                 'Catatan Umum',
@@ -841,7 +969,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                 ),
                                 style: const TextStyle(fontSize: 14),
                                 onChanged: (value) {
-                                  // Update general notes
                                   String updatedContent =
                                       '$value\n\n$hyperglycemiaProtocol\n\n$hypoglycemiaProtocol';
                                   _notesController.text = updatedContent.trim();
@@ -849,8 +976,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                               ),
                               const SizedBox(height: 16),
                             ],
-
-                            // Hyperglycemia Protocol Section
                             if (hyperglycemiaProtocol.isNotEmpty) ...[
                               Card(
                                 elevation: 2,
@@ -899,8 +1024,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                               ),
                               const SizedBox(height: 16),
                             ],
-
-                            // Hypoglycemia Protocol Section
                             if (hypoglycemiaProtocol.isNotEmpty) ...[
                               Card(
                                 elevation: 2,
@@ -949,8 +1072,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                               ),
                               const SizedBox(height: 16),
                             ],
-
-                            // Additional Notes Section
                             const Text(
                               'Catatan Tambahan',
                               style: TextStyle(
@@ -959,15 +1080,15 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                               ),
                             ),
                             const SizedBox(height: 8),
-                            TextField(
+                            const TextField(
                               maxLines: 5,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 hintText:
                                     'Tambahkan catatan tambahan di sini...',
                                 border: OutlineInputBorder(),
                                 contentPadding: EdgeInsets.all(8),
                               ),
-                              style: const TextStyle(fontSize: 14),
+                              style: TextStyle(fontSize: 14),
                             ),
                           ],
                         ),
@@ -999,7 +1120,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
         .map((record) => record.toFormattedString())
         .join('\n\n------------------\n\n');
 
-    // Add prefix if the Izin button was pressed
     if (useIzinFormat) {
       allDataCombined =
           'Izin kak/bang, izin mengirimkan folket atas nama:\n\n$allDataCombined';
@@ -1057,6 +1177,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _roomController.dispose();
     _nameController.dispose();
     _rmController.dispose();
+    _ageController.dispose(); // Disposed age
+    _keluhanController.dispose();
     _timeController.dispose();
     _bpController.dispose();
     _hrController.dispose();
@@ -1065,11 +1187,13 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
     _tempController.dispose();
     _lpmController.dispose();
     _gdsController.dispose();
+    _searchNameController.dispose();
+    _searchRmController.dispose();
+    _searchRoomController.dispose();
     for (var controller in _ivRateControllers) {
       controller.dispose();
     }
-    _notesController.dispose(); // NEW: Dispose notes controller
-    _keluhanController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -1095,6 +1219,8 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 child: Image.asset(
                   'assets/logo_white.png',
                   fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) =>
+                      const Icon(Icons.local_hospital),
                 ),
               ),
             ),
@@ -1136,9 +1262,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                   ],
                 ),
               ),
-
               const Divider(height: 1),
-
               Expanded(
                 child: _savedPatientsList.isEmpty
                     ? const Center(
@@ -1162,17 +1286,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                   ListTile(
                                     title: Text(
                                       patient.name.isNotEmpty
-
-                      // --- Keluhan field ---
-                      TextField(
-                        controller: _keluhanController,
-                        decoration: const InputDecoration(
-                          labelText: 'Keluhan',
-                          border: OutlineInputBorder(),
-                        ),
-                        textCapitalization: TextCapitalization.sentences,
-                      ),
-                      const SizedBox(height: 16),
                                           ? patient.name
                                           : 'Pasien Tanpa Nama',
                                       style: const TextStyle(
@@ -1297,6 +1410,86 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                CheckboxListTile(
+                  value: _isSearchMode,
+                  onChanged: (val) {
+                    setState(() {
+                      _isSearchMode = val ?? false;
+                    });
+                  },
+                  title: const Text('Cari Data Pasien (Auto-fill)'),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: Colors.teal,
+                ),
+                
+                if (_isSearchMode)
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.teal.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Masukkan minimal satu data untuk mencari:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.teal,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _searchNameController,
+                          decoration: const InputDecoration(
+                            labelText: 'Nama Pasien',
+                            border: OutlineInputBorder(),
+                            filled: true,
+                            fillColor: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _searchRmController,
+                          decoration: const InputDecoration(
+                            labelText: 'No. RM',
+                            border: OutlineInputBorder(),
+                            filled: true,
+                            fillColor: Colors.white,
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _searchRoomController,
+                          decoration: const InputDecoration(
+                            labelText: 'Ruangan/Kamar',
+                            border: OutlineInputBorder(),
+                            filled: true,
+                            fillColor: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _isSearching
+                            ? const Center(child: CircularProgressIndicator())
+                            : ElevatedButton.icon(
+                                onPressed: _performSearch,
+                                icon: const Icon(Icons.search),
+                                label: const Text('Cari Pasien'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                              ),
+                      ],
+                    ),
+                  ),
+
                 Text(
                   _editingPatientIndex != null
                       ? 'Edit Data Pasien'
@@ -1339,6 +1532,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 ),
                 const SizedBox(height: 16),
 
+                // --- NEW UI LAYOUT: Nama, Gender, and Umur all in one row ---
                 Row(
                   children: [
                     Expanded(
@@ -1357,7 +1551,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       flex: 1,
                       child: DropdownButtonFormField<String>(
                         isExpanded: true,
-                        initialValue: _selectedGender,
+                        value: _selectedGender,
                         decoration: const InputDecoration(
                           labelText: 'Gender',
                           border: OutlineInputBorder(),
@@ -1372,7 +1566,20 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                           );
                         }).toList(),
                         onChanged: (String? newValue) =>
-                            setState(() => _selectedGender = newValue!),
+                                setState(() => _selectedGender = newValue!),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 1,
+                      child: TextField(
+                        controller: _ageController,
+                        decoration: const InputDecoration(
+                          labelText: 'Umur',
+                          suffixText: 'thn',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
                       ),
                     ),
                   ],
@@ -1416,7 +1623,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         isExpanded: true,
-                        initialValue: _selectedSens,
+                        value: _selectedSens,
                         decoration: const InputDecoration(
                           labelText: 'Sens',
                           hintText: 'Pilih sens',
@@ -1441,6 +1648,18 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       tooltip: 'Clear Sens',
                     ),
                   ],
+                ),
+                const SizedBox(height: 16),
+
+                TextField(
+                  controller: _keluhanController,
+                  decoration: const InputDecoration(
+                    labelText: 'Keluhan',
+                    hintText: 'Keluhan yang sedang dialami pasien',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 2,
+                  textCapitalization: TextCapitalization.sentences,
                 ),
                 const SizedBox(height: 16),
 
@@ -1501,7 +1720,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       flex: 3,
                       child: DropdownButtonFormField<String>(
                         isExpanded: true,
-                        initialValue: _selectedO2Method,
+                        value: _selectedO2Method,
                         decoration: const InputDecoration(
                           labelText: 'Oksigen',
                           border: OutlineInputBorder(),
@@ -1554,25 +1773,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                 ),
 
                 const SizedBox(height: 16),
-                // Add a controller for UOP
-                TextEditingController _uopController = TextEditingController();
-
-                // Clear UOP field in _clearForm
-                _uopController.clear();
-
-                // Dispose UOP controller in dispose
-                _uopController.dispose();
-
-                TextField(
-                  controller: _uopController,
-                  decoration: const InputDecoration(
-                    labelText: 'UOP (Urine Output)',
-                    suffixText: 'ml',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 16),
                 Container(
                   decoration: BoxDecoration(
                     border: Border.all(color: Colors.grey.shade400),
@@ -1591,8 +1791,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                 setState(() {
                                   _isGdsChecked = value ?? false;
                                   if (!_isGdsChecked) {
-                                    _gdsProtocolMessage =
-                                        null; // Clear warning if unchecked
+                                    _gdsProtocolMessage = null; 
                                   }
                                 });
                               },
@@ -1644,12 +1843,9 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                       border: OutlineInputBorder(),
                     ),
                     keyboardType: TextInputType.number,
-                    onChanged: (value) => _evaluateGDSProtocol(
-                      value,
-                    ), // triggers the smart protocol evaluation!
+                    onChanged: (value) => _evaluateGDSProtocol(value),
                   ),
 
-                  // --- NEW UI: Smart Protocol Warning Card ---
                   if (_gdsProtocolMessage != null) ...[
                     const SizedBox(height: 8),
                     Container(
@@ -1694,7 +1890,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                           MaterialTapTargetSize.shrinkWrap,
                                     ),
                                     onPressed: () {
-                                      // Auto-fill the IV section for the user!
                                       setState(() {
                                         _isOnIVDrug = true;
                                         if (_ivDrugSelections.isEmpty) {
@@ -1705,8 +1900,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                             _suggestedNovorapidRate!;
                                         _ivRateControllers[0].text =
                                             _suggestedNovorapidRate!;
-
-                                        // Hide the keyboard so they can see the filled result
                                         FocusScope.of(context).unfocus();
                                       });
                                     },
@@ -1742,7 +1935,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                                   flex: 3,
                                   child: DropdownButtonFormField<String>(
                                     isExpanded: true,
-                                    initialValue: _ivDrugSelections[index],
+                                    value: _ivDrugSelections[index],
                                     decoration: const InputDecoration(
                                       labelText: 'Nama Obat IV',
                                       border: OutlineInputBorder(),
@@ -1800,8 +1993,6 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
                         icon: const Icon(Icons.add),
                         label: const Text('Tambah Obat IV'),
                       ),
-
-                      // Custom fields for 'Lainnya'
                       ..._ivDrugSelections
                           .asMap()
                           .entries
@@ -1940,7 +2131,7 @@ Jika pada follow up KGD per 4 jam, KGD kembali <70, kembali pada protokol awal."
             ),
           ),
 
-          // Notes FAB - positioned on the left side
+          // Notes FAB
           Positioned(
             right: 16,
             bottom: 100,
